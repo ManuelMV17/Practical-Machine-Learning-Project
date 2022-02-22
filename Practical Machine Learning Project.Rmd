@@ -1,0 +1,139 @@
+---
+title: "Practical Machine Learning Project"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+## Introduction
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website [here]( http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/har. ) (see the section on the Weight Lifting Exercise Dataset). 
+
+## Data
+
+You can download the data used here:
+
+- The training data: https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+- The test data: https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+```{r}
+descargarCSV <- function(url, NAstrings) {
+    temp <- tempfile()
+    download.file(url, temp, method = "curl")
+    data <- read.csv(temp, na.strings = NAstrings)
+    unlink(temp)
+    return(data)
+}
+```
+
+```{r}
+urlEntrenamiento <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+entrenamiento <- descargarCSV(urlEntrenamiento, c("NA", "#DIV/0!"))
+
+urlPrueba <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+prueba <- descargarCSV(urlPrueba, c("", "NA", "#DIV/0!"))
+```
+
+## Exploratory data analysis
+
+We see that there are too many NA values. They will have to be removed.
+```{r}
+library(caret)
+```
+
+```{r}
+Porcentaje_maximo_NA = 90
+NAmaximos <- nrow(entrenamiento) / 100 * Porcentaje_maximo_NA
+removerColumnas <- which(colSums(is.na(entrenamiento) | entrenamiento == "") > NAmaximos)
+entreLimpio <- entrenamiento[, -removerColumnas]
+pruebaLimpio <- prueba[, -removerColumnas]
+```
+
+Doing that reduces the number of columns to 60.
+
+```{r}
+dim(entreLimpio); dim(pruebaLimpio)
+```
+
+By looking at the data. we see that the first columns have sequential numbers and time variations that we will not use. They will be removed. 
+
+```{r}
+entreOK <- entreLimpio[, -c(1:6)]
+pruebaOK <- pruebaLimpio[, -c(1:6)]
+dim(entreOK); dim(pruebaOK)
+```
+Now we partition the data.
+
+```{r}
+set.seed(134679)
+enEntre <- createDataPartition(entreOK$classe, p = 3/4, list = F)
+entrenar <- entreOK[enEntre, ]
+validacion <- entreOK[-enEntre, ]
+```
+
+Analyzing the principal components, we got that 25 components are necessary to capture .95 of the variance. But it demands a lot of machine processing so, we decided by a .80 thresh to capture 80% of the variance using 13 components.
+
+```{r}
+PCA <- preProcess(entrenar[, -54], method = "pca", thresh = 0.8)
+PCA
+```
+
+## Preprocessing
+
+```{r}
+# The response class is excluded and the preProce object is created
+preProce <- preProcess(entrenar[, -54], method = "pca", pcaComp = 13, thresh = 0.8)
+# We apply the processing to the test and training data.
+entrenarPCA <- predict(preProce, entrenar[, -54])
+entrenarPCA$classe <- entrenar$classe
+# entrenarPCA only has 13 principal components plus classe
+PCAvalido <- predict(preProce, validacion[, -54])
+PCAvalido$classe <- validacion$classe
+# PCAvalid has only 13 main components plus classe
+```
+
+## Model examination
+
+The random forest model will be used.
+
+```{r}
+library(randomForest)
+```
+```{r, cache=TRUE}
+ajusteCOntrol <- trainControl(method = "cv", number = 5, allowParallel = T)
+
+ajusteArbol <- train(classe ~ ., data = entrenarPCA, method = "rf", trControl = ajusteCOntrol)
+
+print(ajusteArbol, digits = 4)
+```
+
+```{r}
+ajustePrediccion <- predict(ajusteArbol, PCAvalido)
+(arbolMAtrix <- confusionMatrix(as.factor(PCAvalido$classe), ajustePrediccion))
+```
+
+```{r}
+precisionArbol <- arbolMAtrix$overall['Accuracy']
+precisionArbol
+```
+
+The random forest method has a precision of 0.9718597 for this data set. 
+
+## Prediction on Testing Set
+
+Finally we apply the random forest method to the variable "classe" in the test set. 
+
+```{r}
+pruebaPCA <- predict(preProce, pruebaOK[, -54])
+pruebaPCA$problem_id <- pruebaOK$problem_id
+pruebaFinal <- predict(ajusteArbol, pruebaPCA)
+pruebaFinal
+```
+With that we can see how they did the exercise. 
+
+
